@@ -26,6 +26,10 @@ const openApiDocument = {
       url: "http://localhost:5000",
       description: "Local development server",
     },
+    {
+      url: "https://echo-proj-backend.onrender.com",
+      description: "Render hosted server",
+    },
   ],
   tags: [
     { name: "Health", description: "Service health checks" },
