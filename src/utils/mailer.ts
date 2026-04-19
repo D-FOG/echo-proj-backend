@@ -1,4 +1,5 @@
 import { env } from "../config/env";
+import { sendZohoEmail } from "./zoho";
 
 type MailPayload = {
   to: string | string[];
@@ -12,7 +13,11 @@ type ZohoAccessTokenCache = {
   expiresAt: number;
 } | null;
 
-let tokenCache: ZohoAccessTokenCache = env.zohoAccessToken
+const hasRefreshCredentials = Boolean(env.zohoClientId && env.zohoClientSecret && env.zohoRefreshToken);
+
+let tokenCache: ZohoAccessTokenCache = hasRefreshCredentials
+  ? null
+  : env.zohoAccessToken
   ? {
       token: env.zohoAccessToken,
       expiresAt: Date.now() + 45 * 60 * 1000,
@@ -22,7 +27,7 @@ let tokenCache: ZohoAccessTokenCache = env.zohoAccessToken
 const canSendMail = Boolean(
   env.zohoMailAccountId &&
     env.mailFrom &&
-    ((env.zohoClientId && env.zohoClientSecret && env.zohoRefreshToken) || env.zohoAccessToken),
+    (hasRefreshCredentials || env.zohoAccessToken),
 );
 
 const extractAddress = (value: string) => {
@@ -84,27 +89,13 @@ export const sendMail = async ({ to, subject, text, html }: MailPayload) => {
 
   try {
     const accessToken = await getZohoAccessToken();
-    const response = await fetch(`${env.zohoMailApiBaseUrl}/accounts/${env.zohoMailAccountId}/messages`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Zoho-oauthtoken ${accessToken}`,
-      },
-      body: JSON.stringify({
-        fromAddress: extractAddress(env.mailFrom),
-        toAddress: Array.isArray(to) ? to.join(",") : to,
-        subject,
-        content: html ?? text,
-        mailFormat: html ? "html" : "plaintext",
-        encoding: "UTF-8",
-      }),
+    await sendZohoEmail(accessToken, env.zohoMailAccountId, {
+      fromAddress: extractAddress(env.mailFrom),
+      toAddress: Array.isArray(to) ? to.join(",") : to,
+      subject,
+      content: html ?? text,
+      mailFormat: html ? "html" : "plaintext",
     });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Zoho Mail API send failed: ${response.status} ${body}`);
-    }
   } catch (error) {
     console.error("Failed to send email:", subject, error);
   }

@@ -6,6 +6,7 @@ import PlatformSetting from "../models/PlatformSetting";
 import SupportMessage from "../models/SupportMessage";
 import Transaction from "../models/Transaction";
 import User from "../models/User";
+import Notification from "../models/Notification";
 import { env } from "../config/env";
 import { createAuditLog } from "../utils/audit";
 import { asyncHandler } from "../utils/async-handler";
@@ -28,6 +29,32 @@ const addMonths = (date: Date, months: number): Date => {
   const nextDate = new Date(date);
   nextDate.setMonth(nextDate.getMonth() + months);
   return nextDate;
+};
+
+const getSupportEmail = (): string => env.adminSupportEmail || "support@echolalax.com";
+
+const sendAdminNotification = async (createdBy: string, title: string, message: string) => {
+  await Notification.create({
+    title,
+    message,
+    channel: "in_app",
+    audience: "admins",
+    createdBy,
+    sentAt: new Date(),
+  });
+};
+
+const notifyAdminsByEmail = async (subject: string, html: string) => {
+  const admins = await User.find({ role: "admin", status: "active" }).select("email").lean();
+  await Promise.all(
+    admins.map((admin) =>
+      sendMail({
+        to: admin.email,
+        subject,
+        html,
+      }),
+    ),
+  );
 };
 
 const getNextRunDate = (currentDate: Date, frequency: string): Date | undefined => {
@@ -260,6 +287,18 @@ export const createAutomation = asyncHandler(async (req: Request, res: Response)
     targetType: "Automation",
   });
 
+  const user = await User.findById(req.user!.id).select("name email").lean();
+  const userLabel = user ? `${user.name} (${user.email})` : "A user";
+  const title = "New automation created";
+  const message = `${userLabel} created a new automation for ${automation.serviceName} ${automation.planName ? `(${automation.planName})` : ""} with amount ${automation.amount}.`;
+
+  await sendAdminNotification(req.user!.id, title, message);
+  await notifyAdminsByEmail(
+    `New automation created by ${user?.name || "a user"}`,
+    `<p>${message}</p>
+      <p>Review the automation in the admin dashboard.</p>`,
+  );
+
   res.status(201).json({
     success: true,
     message: "Automation created successfully",
@@ -396,6 +435,18 @@ export const deleteAutomation = asyncHandler(async (req: Request, res: Response)
     targetId: String(automation._id),
     targetType: "Automation",
   });
+
+  const user = await User.findById(req.user!.id).select("name email").lean();
+  const userLabel = user ? `${user.name} (${user.email})` : "A user";
+  const title = "Automation cancelled";
+  const message = `${userLabel} cancelled an automation for ${automation.serviceName} ${automation.planName ? `(${automation.planName})` : ""}.`;
+
+  await sendAdminNotification(req.user!.id, title, message);
+  await notifyAdminsByEmail(
+    `Automation cancelled by ${user?.name || "a user"}`,
+    `<p>${message}</p>
+      <p>Review the cancellation in the admin dashboard.</p>`,
+  );
 
   res.status(200).json({
     success: true,

@@ -36,6 +36,7 @@ const openApiDocument = {
     { name: "Auth", description: "Authentication and identity endpoints" },
     { name: "User", description: "Protected user dashboard endpoints" },
     { name: "Admin", description: "Protected admin portal endpoints" },
+    { name: "Zoho", description: "Zoho OAuth and Mail API endpoints" },
   ],
   components: {
     securitySchemes: bearerSecurityScheme,
@@ -175,6 +176,125 @@ const openApiDocument = {
           message: { type: "string", example: "We will be undergoing maintenance tonight." },
           channel: { type: "string", enum: ["email", "push", "in_app"], example: "email" },
           audience: { type: "string", enum: ["all", "users", "admins"], example: "all" },
+        },
+      },
+      ZohoAuthUrlResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          authUrl: { type: "string", example: "https://accounts.zoho.com/oauth/v2/auth?..." },
+        },
+      },
+      ZohoTokenData: {
+        type: "object",
+        properties: {
+          access_token: { type: "string", example: "1000.xxx..." },
+          refresh_token: { type: "string", example: "1000.xxx..." },
+          expires_in: { type: "number", example: 3600 },
+          token_type: { type: "string", example: "Bearer" },
+        },
+      },
+      ZohoCallbackResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          message: { type: "string", example: "Zoho token exchange succeeded." },
+          tokenData: { $ref: "#/components/schemas/ZohoTokenData" },
+          profile: { type: "object", additionalProperties: true },
+        },
+      },
+      ZohoRefreshResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          tokenData: { $ref: "#/components/schemas/ZohoTokenData" },
+        },
+      },
+      ZohoAccountsResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          accounts: { type: "array", items: { type: "object", additionalProperties: true } },
+        },
+      },
+      ZohoProfileResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          profile: { type: "object", additionalProperties: true },
+        },
+      },
+      ZohoTestEmailRequest: {
+        type: "object",
+        required: ["to", "subject", "content"],
+        properties: {
+          to: { type: "string", format: "email", example: "paula@zylker.com" },
+          cc: { type: "string", format: "email", example: "david@zylker.com" },
+          bcc: { type: "string", format: "email", example: "rebecca11@zylker.com" },
+          subject: { type: "string", example: "Email - Always and Forever" },
+          content: { type: "string", example: "Email can never be dead. The most neutral and effective way..." },
+          askReceipt: { type: "string", enum: ["yes", "no"], example: "yes" },
+        },
+      },
+      ZohoTestEmailResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean", example: true },
+          message: { type: "string", example: "Test email sent successfully." },
+          emailResult: { type: "object", additionalProperties: true },
+        },
+      },
+      InvoiceCreateRequest: {
+        type: "object",
+        required: ["title", "amount", "userId"],
+        properties: {
+          title: { type: "string", example: "Invoice for Services" },
+          description: { type: "string", example: "Payment for Q1 2026 services" },
+          amount: { type: "number", example: 50000 },
+          userId: { type: "string", example: "661d31f2c1d87c738baf2131" },
+          dueDate: { type: "string", format: "date-time", example: "2026-05-18" },
+          currency: { type: "string", example: "NGN" },
+        },
+      },
+      InvoiceData: {
+        type: "object",
+        properties: {
+          _id: { type: "string" },
+          invoiceNumber: { type: "string", example: "INV-1234567890-123" },
+          title: { type: "string" },
+          description: { type: "string" },
+          amount: { type: "number" },
+          currency: { type: "string", example: "NGN" },
+          user: { type: "object", additionalProperties: true },
+          createdBy: { type: "object", additionalProperties: true },
+          invoiceFile: { type: "object", properties: { url: { type: "string" }, publicId: { type: "string" } } },
+          status: { type: "string", enum: ["draft", "sent", "paid", "overdue", "cancelled"] },
+          paymentStatus: { type: "string", enum: ["pending", "confirmed", "rejected"] },
+          dueDate: { type: "string", format: "date-time" },
+          paidAt: { type: "string", format: "date-time" },
+          sentAt: { type: "string", format: "date-time" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      BankDetails: {
+        type: "object",
+        properties: {
+          accountName: { type: "string", example: "Echolalax Global" },
+          accountNumber: { type: "string", example: "0000000000" },
+          bankName: { type: "string", example: "First Bank" },
+        },
+      },
+      PaymentReceiptData: {
+        type: "object",
+        properties: {
+          _id: { type: "string" },
+          invoice: { type: "string" },
+          user: { type: "string" },
+          receiptFile: { type: "object", properties: { url: { type: "string" }, publicId: { type: "string" } } },
+          status: { type: "string", enum: ["submitted", "confirmed", "rejected"] },
+          submittedAt: { type: "string", format: "date-time" },
+          confirmedAt: { type: "string", format: "date-time" },
         },
       },
     },
@@ -669,6 +789,349 @@ const openApiDocument = {
         },
         responses: {
           "201": { description: "Notification created" },
+        },
+      },
+    },
+    "/api/zoho/auth-url": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Get Zoho OAuth authorization URL",
+        responses: {
+          "200": {
+            description: "Authorization URL generated",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoAuthUrlResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/zoho/auth": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Redirect to Zoho OAuth authorization page",
+        responses: {
+          "302": {
+            description: "Redirect to Zoho authorization",
+          },
+        },
+      },
+    },
+    "/api/zoho/callback": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Zoho OAuth callback - exchanges code for tokens",
+        parameters: [
+          { in: "query", name: "code", schema: { type: "string" }, description: "Authorization code from Zoho" },
+          { in: "query", name: "error", schema: { type: "string" }, description: "Error from Zoho if any" },
+        ],
+        responses: {
+          "200": {
+            description: "Token exchange successful",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoCallbackResponse" },
+              },
+            },
+          },
+          "400": {
+            description: "Authorization failed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/zoho/refresh": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Refresh Zoho access token using refresh token",
+        responses: {
+          "200": {
+            description: "Token refreshed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoRefreshResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/zoho/accounts": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Get Zoho Mail accounts",
+        responses: {
+          "200": {
+            description: "Accounts retrieved",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoAccountsResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/zoho/profile": {
+      get: {
+        tags: ["Zoho"],
+        summary: "Get Zoho user profile",
+        responses: {
+          "200": {
+            description: "Profile retrieved",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoProfileResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/zoho/test-email": {
+      post: {
+        tags: ["Zoho"],
+        summary: "Send a test email via Zoho Mail",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ZohoTestEmailRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Test email sent",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ZohoTestEmailResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/invoices/admin": {
+      post: {
+        tags: ["Invoices"],
+        summary: "Create a new invoice",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/InvoiceCreateRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Invoice created",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean" },
+                    message: { type: "string" },
+                    data: { $ref: "#/components/schemas/InvoiceData" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      get: {
+        tags: ["Invoices"],
+        summary: "List admin invoices",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: "query", name: "page", schema: { type: "integer", example: 1 } },
+          { in: "query", name: "limit", schema: { type: "integer", example: 10 } },
+        ],
+        responses: {
+          "200": { description: "Invoices retrieved" },
+        },
+      },
+    },
+    "/api/invoices/admin/upload": {
+      post: {
+        tags: ["Invoices"],
+        summary: "Upload invoice file",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  invoiceId: { type: "string" },
+                  file: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "File uploaded successfully" },
+        },
+      },
+    },
+    "/api/invoices/admin/send": {
+      post: {
+        tags: ["Invoices"],
+        summary: "Send invoice to user",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["invoiceId"],
+                properties: {
+                  invoiceId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Invoice sent successfully" },
+        },
+      },
+    },
+    "/api/invoices/admin/receipts/pending": {
+      get: {
+        tags: ["Invoices"],
+        summary: "Get pending payment receipts for admin",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: "query", name: "page", schema: { type: "integer", example: 1 } },
+          { in: "query", name: "limit", schema: { type: "integer", example: 10 } },
+        ],
+        responses: {
+          "200": { description: "Pending receipts retrieved" },
+        },
+      },
+    },
+    "/api/invoices/admin/confirm-payment": {
+      post: {
+        tags: ["Invoices"],
+        summary: "Confirm payment receipt",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["receiptId"],
+                properties: {
+                  receiptId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Payment confirmed" },
+        },
+      },
+    },
+    "/api/invoices": {
+      get: {
+        tags: ["Invoices"],
+        summary: "List user invoices",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: "query", name: "page", schema: { type: "integer", example: 1 } },
+          { in: "query", name: "limit", schema: { type: "integer", example: 10 } },
+        ],
+        responses: {
+          "200": { description: "Invoices retrieved" },
+        },
+      },
+    },
+    "/api/invoices/{id}": {
+      get: {
+        tags: ["Invoices"],
+        summary: "Get invoice details with bank info for payment",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: "path",
+            name: "id",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Invoice details with bank account info",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean" },
+                    data: {
+                      allOf: [
+                        { $ref: "#/components/schemas/InvoiceData" },
+                        {
+                          type: "object",
+                          properties: {
+                            bankDetails: { $ref: "#/components/schemas/BankDetails" },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/invoices/{id}/receipt": {
+      post: {
+        tags: ["Invoices"],
+        summary: "Upload payment receipt",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: "path",
+            name: "id",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  receipt: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Receipt uploaded successfully" },
         },
       },
     },

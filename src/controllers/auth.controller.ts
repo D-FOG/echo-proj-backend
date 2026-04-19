@@ -9,6 +9,8 @@ import { asyncHandler } from "../utils/async-handler";
 import { ApiError } from "../utils/api-error";
 import { signToken } from "../utils/jwt";
 import { comparePassword, hashPassword } from "../utils/password";
+import { sendMail } from "../utils/mailer";
+import { env } from "../config/env";
 
 const sanitizeUser = (user: Record<string, unknown>) => ({
   id: String(user._id ?? ""),
@@ -67,6 +69,15 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     targetType: "User",
   });
 
+  await sendMail({
+    to: user.email,
+    subject: "Welcome to Echolalax",
+    html: `<p>Hello ${user.name},</p>
+      <p>Welcome to Echolalax! Your account has been created successfully.</p>
+      <p>If you did not sign up for this account, please contact <a href="mailto:${env.adminSupportEmail || "support@echolalax.com"}">${env.adminSupportEmail || "support@echolalax.com"}</a> immediately.</p>
+      <p>Thank you for joining Echolalax.</p>`,
+  });
+
   res.status(201).json({
     success: true,
     message: "Account created successfully",
@@ -115,6 +126,15 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     action: "auth.login",
     targetId: String(user._id),
     targetType: "User",
+  });
+
+  await sendMail({
+    to: user.email,
+    subject: "New Echolalax sign-in detected",
+    html: `<p>Hello ${user.name},</p>
+      <p>We noticed a successful sign-in to your Echolalax account.</p>
+      <p>If this was not you, contact <a href="mailto:${env.adminSupportEmail || "support@echolalax.com"}">${env.adminSupportEmail || "support@echolalax.com"}</a> immediately.</p>
+      <p>If you want, you can change your password from your account settings.</p>`,
   });
 
   res.status(200).json({
