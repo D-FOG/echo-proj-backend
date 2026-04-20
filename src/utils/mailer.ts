@@ -4,7 +4,7 @@ import { sendZohoEmail } from "./zoho";
 type MailPayload = {
   to: string | string[];
   subject: string;
-  text: string;
+  text?: string;
   html?: string;
 };
 
@@ -87,13 +87,18 @@ export const sendMail = async ({ to, subject, text, html }: MailPayload) => {
     return;
   }
 
+  if (!html && !text) {
+    console.warn("Skipping email with no content:", subject);
+    return;
+  }
+
   try {
     const accessToken = await getZohoAccessToken();
     await sendZohoEmail(accessToken, env.zohoMailAccountId, {
       fromAddress: extractAddress(env.mailFrom),
       toAddress: Array.isArray(to) ? to.join(",") : to,
       subject,
-      content: html ?? text,
+      content: html ?? text ?? "",
       mailFormat: html ? "html" : "plaintext",
     });
   } catch (error) {
