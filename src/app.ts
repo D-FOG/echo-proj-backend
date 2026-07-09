@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 
 import adminRoutes from "./routes/admin.routes";
+import academyRoutes from "./routes/academy.routes";
 import authRoutes from "./routes/auth.routes";
 import { env } from "./config/env";
 import { setupSwagger } from "./config/swagger";
@@ -178,6 +179,7 @@ app.post("/api/zoho/test-email", async (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/academy", academyRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invoices", invoiceRoutes);

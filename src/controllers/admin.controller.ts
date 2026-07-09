@@ -2,6 +2,10 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 
 import Automation from "../models/Automation";
+import {
+  listAcademyEnrollments,
+  updateAcademyEnrollmentStatus,
+} from "./academy.controller";
 import AuditLog from "../models/AuditLog";
 import Notification from "../models/Notification";
 import PlatformSetting from "../models/PlatformSetting";
@@ -13,6 +17,8 @@ import { asyncHandler } from "../utils/async-handler";
 import { ApiError } from "../utils/api-error";
 import { sendMail } from "../utils/mailer";
 import { getPagination } from "../utils/pagination";
+
+export { listAcademyEnrollments, updateAcademyEnrollmentStatus };
 
 const ensureObjectId = (id: string): mongoose.Types.ObjectId => {
   if (!mongoose.Types.ObjectId.isValid(id)) {

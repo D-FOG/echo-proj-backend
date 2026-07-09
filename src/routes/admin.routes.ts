@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import {
   createNotification,
+  listAcademyEnrollments,
   getMessageDetails,
   getAdminOverview,
   getSettings,
@@ -13,6 +14,7 @@ import {
   listUsers,
   replyToMessage,
   resolveMessage,
+  updateAcademyEnrollmentStatus,
   updateSettings,
   updateUserStatus,
 } from "../controllers/admin.controller";
@@ -27,6 +29,8 @@ router.get("/users", listUsers);
 router.get("/users/:id", getUserDetails);
 router.put("/users/:id/status", updateUserStatus);
 router.get("/automations", listPlatformAutomations);
+router.get("/academy/enrollments", listAcademyEnrollments);
+router.put("/academy/enrollments/:id/status", updateAcademyEnrollmentStatus);
 router.get("/messages", listMessages);
 router.get("/messages/:id", getMessageDetails);
 router.put("/messages/:id/resolve", resolveMessage);
