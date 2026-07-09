@@ -230,3 +230,55 @@ export const updateAcademyEnrollmentStatus = asyncHandler(async (req: Request, r
     data: enrollment,
   });
 });
+
+export const emailAcademyEnrollmentApplicant = asyncHandler(async (req: Request, res: Response) => {
+  const { message } = req.body as {
+    message?: string;
+  };
+
+  const cleanedMessage = normalizeText(message);
+
+  if (!cleanedMessage) {
+    throw new ApiError(400, "message is required");
+  }
+
+  const enrollment = await AcademyEnrollment.findById(ensureObjectId(req.params.id));
+
+  if (!enrollment) {
+    throw new ApiError(404, "Academy enrollment not found");
+  }
+
+  enrollment.adminMessage = cleanedMessage;
+  await enrollment.save();
+
+  await createAuditLog({
+    actorId: req.user!.id,
+    actorRole: "admin",
+    action: "admin.academy_enrollment_email_sent",
+    targetId: String(enrollment._id),
+    targetType: "AcademyEnrollment",
+    metadata: {
+      course: enrollment.course,
+      email: enrollment.email,
+    },
+  });
+
+  await sendMail({
+    to: enrollment.email,
+    subject: "Echolalax Academy enrollment update",
+    text: [
+      `Hello ${enrollment.firstName},`,
+      "",
+      cleanedMessage,
+      "",
+      "Regards,",
+      "Echolalax Academy",
+    ].join("\n"),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Academy enrollment email sent successfully",
+    data: enrollment,
+  });
+});

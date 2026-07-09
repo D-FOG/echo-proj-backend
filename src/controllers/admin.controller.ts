@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 
 import Automation from "../models/Automation";
 import {
+  emailAcademyEnrollmentApplicant,
   listAcademyEnrollments,
   updateAcademyEnrollmentStatus,
 } from "./academy.controller";
@@ -18,7 +19,7 @@ import { ApiError } from "../utils/api-error";
 import { sendMail } from "../utils/mailer";
 import { getPagination } from "../utils/pagination";
 
-export { listAcademyEnrollments, updateAcademyEnrollmentStatus };
+export { emailAcademyEnrollmentApplicant, listAcademyEnrollments, updateAcademyEnrollmentStatus };
 
 const ensureObjectId = (id: string): mongoose.Types.ObjectId => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
