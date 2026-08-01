@@ -8,6 +8,7 @@ import { env } from "./config/env";
 import { setupSwagger } from "./config/swagger";
 import userRoutes from "./routes/user.routes";
 import invoiceRoutes from "./routes/invoice.routes";
+import subscriptionRoutes from "./routes/subscription.routes";
 import { exchangeZohoCode, fetchZohoMailAccounts, fetchZohoProfile, getZohoAuthUrl, refreshZohoAccessToken, sendZohoEmail } from "./utils/zoho";
 import { errorHandler } from "./middleware/error.middleware";
 import { notFoundHandler } from "./middleware/not-found.middleware";
@@ -183,6 +184,7 @@ app.use("/api/academy", academyRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invoices", invoiceRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
