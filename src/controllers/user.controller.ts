@@ -7,6 +7,8 @@ import SupportMessage from "../models/SupportMessage";
 import Transaction from "../models/Transaction";
 import User from "../models/User";
 import Notification from "../models/Notification";
+import RenewalRequest from "../models/RenewalRequest";
+import Subscription from "../models/Subscription";
 import { env } from "../config/env";
 import { createAuditLog } from "../utils/audit";
 import { asyncHandler } from "../utils/async-handler";
@@ -14,6 +16,7 @@ import { ApiError } from "../utils/api-error";
 import { sendMail } from "../utils/mailer";
 import { getPagination } from "../utils/pagination";
 import { comparePassword, hashPassword } from "../utils/password";
+import { getRemainingDays, getSubscriptionStatus, type SubscriptionStatus } from "../utils/subscription-status";
 
 const ensureObjectId = (id: string): mongoose.Types.ObjectId => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -43,6 +46,89 @@ const sendAdminNotification = async (createdBy: string, title: string, message: 
     sentAt: new Date(),
   });
 };
+
+const serializeSubscription = (subscription: any, now = new Date()) => {
+  const item = subscription.toObject ? subscription.toObject() : subscription;
+  const endDate = new Date(item.endDate);
+  return { ...item, remainingDays: getRemainingDays(endDate, now), status: getSubscriptionStatus(endDate, now) };
+};
+
+const getSubscriptionStatusFilter = (status: SubscriptionStatus, now: Date): Record<string, unknown> => {
+  const day = 24 * 60 * 60 * 1000;
+  if (status === "expired") return { endDate: { $lt: now } };
+  if (status === "expiring_soon") return { endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } };
+  if (status === "warning") return { endDate: { $gt: new Date(now.getTime() + 5 * day), $lte: new Date(now.getTime() + 15 * day) } };
+  return { endDate: { $gt: new Date(now.getTime() + 15 * day) } };
+};
+
+export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Response) => {
+  const userId = ensureObjectId(req.user!.id);
+  const now = new Date();
+  const day = 24 * 60 * 60 * 1000;
+  const baseFilter = { customer: userId };
+  const [active, expiringSoon, expired, totalDecoders] = await Promise.all([
+    Subscription.countDocuments({ ...baseFilter, endDate: { $gt: new Date(now.getTime() + 15 * day) } }),
+    Subscription.countDocuments({ ...baseFilter, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } }),
+    Subscription.countDocuments({ ...baseFilter, endDate: { $lt: now } }),
+    Subscription.countDocuments(baseFilter),
+  ]);
+  const notices = await Subscription.find({ ...baseFilter, endDate: { $gte: now, $lte: new Date(now.getTime() + 15 * day) } }).sort({ endDate: 1 }).lean();
+  const notifications = notices.map((subscription) => {
+    const remainingDays = getRemainingDays(new Date(subscription.endDate), now);
+    const status = getSubscriptionStatus(new Date(subscription.endDate), now);
+    return { subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays, status, message: status === "expiring_soon" ? `Your decoder ${subscription.iucNumber} expires in ${remainingDays} day(s).` : `Your decoder ${subscription.iucNumber} expires in ${remainingDays} day(s).` };
+  });
+  const expiredSubscriptions = await Subscription.find({ ...baseFilter, endDate: { $lt: now } }).sort({ endDate: -1 }).limit(10).lean();
+  notifications.push(...expiredSubscriptions.map((subscription) => ({ subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays: getRemainingDays(new Date(subscription.endDate), now), status: "expired" as SubscriptionStatus, message: `Your decoder ${subscription.iucNumber} subscription has expired.` })));
+  res.status(200).json({ success: true, data: { active, expiringSoon, expired, totalDecoders, notifications } });
+});
+
+export const listSubscriptions = asyncHandler(async (req: Request, res: Response) => {
+  const { page, limit, skip } = getPagination(req.query.page as string, req.query.limit as string);
+  const search = (req.query.search as string | undefined)?.trim();
+  const provider = (req.query.provider as string | undefined)?.trim();
+  const status = req.query.status as SubscriptionStatus | undefined;
+  const now = new Date();
+  const filter: Record<string, any> = { customer: ensureObjectId(req.user!.id) };
+  if (search) filter.iucNumber = { $regex: search, $options: "i" };
+  if (provider) filter.provider = { $regex: provider, $options: "i" };
+  if (status) {
+    if (!(["active", "warning", "expiring_soon", "expired"] as string[]).includes(status)) throw new ApiError(400, "Invalid status filter");
+    Object.assign(filter, getSubscriptionStatusFilter(status, now));
+  }
+  const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
+  const [subscriptions, total] = await Promise.all([
+    Subscription.find(filter).sort({ endDate: sortOrder }).skip(skip).limit(limit),
+    Subscription.countDocuments(filter),
+  ]);
+  res.status(200).json({ success: true, data: subscriptions.map((item) => serializeSubscription(item, now)), pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+});
+
+export const getSubscription = asyncHandler(async (req: Request, res: Response) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new ApiError(400, "Invalid subscription id");
+  const userId = ensureObjectId(req.user!.id);
+  const subscription = await Subscription.findOne({ _id: req.params.id, customer: userId });
+  if (!subscription) throw new ApiError(404, "Subscription not found");
+  const [subscriptionHistory, renewalHistory] = await Promise.all([
+    Subscription.find({ customer: userId, iucNumber: subscription.iucNumber }).sort({ startDate: -1 }),
+    RenewalRequest.find({ subscription: subscription._id, user: userId }).sort({ createdAt: -1 }),
+  ]);
+  res.status(200).json({ success: true, data: { ...serializeSubscription(subscription), subscriptionHistory: subscriptionHistory.map((item) => serializeSubscription(item)), renewalHistory } });
+});
+
+export const requestSubscriptionRenewal = asyncHandler(async (req: Request, res: Response) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new ApiError(400, "Invalid subscription id");
+  const userId = ensureObjectId(req.user!.id);
+  const subscription = await Subscription.findOne({ _id: req.params.id, customer: userId });
+  if (!subscription) throw new ApiError(404, "Subscription not found");
+  const existing = await RenewalRequest.findOne({ subscription: subscription._id, user: userId, status: "pending" });
+  if (existing) throw new ApiError(409, "A renewal request is already pending for this decoder");
+  const message = typeof req.body.message === "string" ? req.body.message.trim() : undefined;
+  const request = await RenewalRequest.create({ subscription: subscription._id, user: userId, message });
+  await sendAdminNotification(req.user!.id, "Decoder renewal requested", `${req.user!.id} requested a renewal for IUC ${subscription.iucNumber}.`);
+  await createAuditLog({ actorId: req.user!.id, actorRole: "user", action: "subscription.renewal_requested", targetId: String(request._id), targetType: "RenewalRequest", metadata: { subscriptionId: String(subscription._id) } });
+  res.status(201).json({ success: true, message: "Your renewal request has been sent to the administrators", data: request });
+});
 
 const notifyAdminsByEmail = async (subject: string, html: string) => {
   const admins = await User.find({ role: "admin", status: "active" }).select("email").lean();

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 
 import Subscription from "../models/Subscription";
+import RenewalRequest from "../models/RenewalRequest";
 import { asyncHandler } from "../utils/async-handler";
 import { ApiError } from "../utils/api-error";
 import { getPagination } from "../utils/pagination";
@@ -160,4 +161,30 @@ export const getSubscriptionSummary = asyncHandler(async (_req: Request, res: Re
     Subscription.find().populate("customer", "name email").populate("createdBy", "name email").sort({ createdAt: -1 }).limit(5),
   ]);
   res.status(200).json({ success: true, data: { active, expiringSoon, expired, recentlyAdded: recentlyAdded.map((item) => serializeSubscription(item, now)) } });
+});
+
+export const listRenewalRequests = asyncHandler(async (req: Request, res: Response) => {
+  const { page, limit, skip } = getPagination(req.query.page as string, req.query.limit as string);
+  const status = req.query.status as string | undefined;
+  const filter = status ? { status } : {};
+  if (status && !["pending", "approved", "completed", "rejected"].includes(status)) throw new ApiError(400, "Invalid renewal request status");
+  const [requests, total] = await Promise.all([
+    RenewalRequest.find(filter).populate("subscription", "customerName iucNumber provider bouquet endDate").populate("user", "name email phone").populate("reviewedBy", "name email").sort({ createdAt: -1 }).skip(skip).limit(limit),
+    RenewalRequest.countDocuments(filter),
+  ]);
+  res.status(200).json({ success: true, data: requests, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+});
+
+export const updateRenewalRequest = asyncHandler(async (req: Request, res: Response) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new ApiError(400, "Invalid renewal request id");
+  const status = req.body.status as string | undefined;
+  if (!status || !["approved", "completed", "rejected"].includes(status)) throw new ApiError(400, "status must be approved, completed, or rejected");
+  const request = await RenewalRequest.findById(req.params.id);
+  if (!request) throw new ApiError(404, "Renewal request not found");
+  request.status = status as "approved" | "completed" | "rejected";
+  request.reviewedBy = new mongoose.Types.ObjectId(req.user!.id);
+  request.reviewedAt = new Date();
+  await request.save();
+  await createAuditLog({ actorId: req.user!.id, actorRole: "admin", action: `subscription.renewal_${status}`, targetId: String(request._id), targetType: "RenewalRequest" });
+  res.status(200).json({ success: true, message: "Renewal request updated successfully", data: request });
 });

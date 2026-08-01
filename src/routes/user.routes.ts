@@ -19,6 +19,10 @@ import {
   updateAutomationStatus,
   updateAutomation,
   updateProfile,
+  getSubscriptionOverview,
+  listSubscriptions as listUserSubscriptions,
+  getSubscription as getUserSubscription,
+  requestSubscriptionRenewal,
 } from "../controllers/user.controller";
 import { authenticate, authorize } from "../middleware/auth.middleware";
 
@@ -27,6 +31,10 @@ const router = Router();
 router.use(authenticate, authorize("user"));
 
 router.get("/overview", getOverview);
+router.get("/subscriptions/overview", getSubscriptionOverview);
+router.get("/subscriptions", listUserSubscriptions);
+router.get("/subscriptions/:id", getUserSubscription);
+router.post("/subscriptions/:id/renewal-requests", requestSubscriptionRenewal);
 router.get("/transactions", getTransactions);
 router.post("/wallet/fund", fundWallet);
 router.get("/automations", listAutomations);
