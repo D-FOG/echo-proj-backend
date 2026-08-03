@@ -38,14 +38,22 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     phone?: string;
   };
 
-  if (!name || !email || !password) {
-    throw new ApiError(400, "name, email and password are required");
+  if (!name) {
+    throw new ApiError(400, "Full name is required");
+  }
+
+  if (!email) {
+    throw new ApiError(400, "Email address is required");
+  }
+
+  if (!password) {
+    throw new ApiError(400, "Password is required");
   }
 
   const existingUser = await User.findOne({ email: email.toLowerCase() });
 
   if (existingUser) {
-    throw new ApiError(409, "User with this email already exists");
+    throw new ApiError(409, "This email address is already in use. Sign in or use a different email.");
   }
 
   const user = await User.create({
@@ -94,20 +102,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     password?: string;
   };
 
-  if (!email || !password) {
-    throw new ApiError(400, "email and password are required");
+  if (!email) {
+    throw new ApiError(400, "Email address is required");
+  }
+
+  if (!password) {
+    throw new ApiError(400, "Password is required");
   }
 
   const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
-    throw new ApiError(401, "Invalid email or password");
+    throw new ApiError(401, "No account was found with this email address");
   }
 
   const passwordMatches = await comparePassword(password, user.password);
 
   if (!passwordMatches) {
-    throw new ApiError(401, "Invalid email or password");
+    throw new ApiError(401, "The password you entered is incorrect");
   }
 
   if (user.status !== "active") {

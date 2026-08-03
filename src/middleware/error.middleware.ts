@@ -28,9 +28,14 @@ export const errorHandler = (
   }
 
   if ("code" in error && error.code === 11000) {
+    const duplicateFields = (error as { keyPattern?: Record<string, unknown> }).keyPattern;
+    const message = duplicateFields?.email
+      ? "This email address is already in use. Sign in or use a different email."
+      : "A record with the supplied value already exists";
+
     res.status(409).json({
       success: false,
-      message: "A record with the supplied value already exists",
+      message,
     });
     return;
   }
