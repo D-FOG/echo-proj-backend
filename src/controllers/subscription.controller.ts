@@ -61,34 +61,60 @@ const validateRange = (startDate: Date, endDate: Date) => {
 };
 
 export const createSubscription = asyncHandler(async (req: Request, res: Response) => {
-  const input = req.body as SubscriptionInput;
-  if (!input.iucNumber?.trim()) throw new ApiError(400, "iucNumber is required");
-  if (!input.startDate) throw new ApiError(400, "startDate is required");
-  if (input.durationDays === undefined) throw new ApiError(400, "durationDays is required");
-  if (input.durationMonths !== undefined || input.endDate !== undefined) throw new ApiError(400, "Use durationDays when creating a subscription");
-  if (input.customerId && !mongoose.Types.ObjectId.isValid(input.customerId)) throw new ApiError(400, "customerId is invalid");
+  const inputs = Array.isArray(req.body) ? req.body : [req.body];
+  if (inputs.length === 0) throw new ApiError(400, "Provide at least one subscription");
 
-  const startDate = ensureDate(input.startDate, "startDate")!;
-  const endDate = getEndDate(input, startDate, true)!;
-  validateRange(startDate, endDate);
-  const subscription = await Subscription.create({
-    customer: input.customerId,
-    customerName: input.customerName,
-    iucNumber: input.iucNumber,
-    tagId: input.tagId,
-    serialNumber: input.serialNumber,
-    model: input.model,
-    provider: input.provider,
-    bouquet: input.bouquet,
-    startDate,
-    endDate,
-    durationDays: input.endDate ? undefined : input.durationDays,
-    durationMonths: input.endDate ? undefined : input.durationMonths,
-    notes: input.notes,
-    createdBy: req.user!.id,
+  const subscriptionsToCreate = inputs.map((rawInput, index) => {
+    if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
+      throw new ApiError(400, `Subscription ${index + 1} must be a JSON object`);
+    }
+    const input = rawInput as SubscriptionInput;
+    try {
+      if (!input.iucNumber?.trim()) throw new ApiError(400, "iucNumber is required");
+      if (!input.startDate) throw new ApiError(400, "startDate is required");
+      if (input.durationDays === undefined) throw new ApiError(400, "durationDays is required");
+      if (input.durationMonths !== undefined || input.endDate !== undefined) throw new ApiError(400, "Use durationDays when creating a subscription");
+      if (input.customerId && !mongoose.Types.ObjectId.isValid(input.customerId)) throw new ApiError(400, "customerId is invalid");
+
+      const startDate = ensureDate(input.startDate, "startDate")!;
+      const endDate = getEndDate(input, startDate, true)!;
+      validateRange(startDate, endDate);
+      return {
+        customer: input.customerId,
+        customerName: input.customerName,
+        iucNumber: input.iucNumber.trim(),
+        tagId: input.tagId,
+        serialNumber: input.serialNumber,
+        model: input.model,
+        provider: input.provider,
+        bouquet: input.bouquet,
+        startDate,
+        endDate,
+        durationDays: input.durationDays,
+        notes: input.notes,
+        createdBy: req.user!.id,
+      };
+    } catch (error) {
+      if (error instanceof ApiError) throw new ApiError(error.statusCode, `Subscription ${index + 1}: ${error.message}`);
+      throw error;
+    }
   });
-  await createAuditLog({ actorId: req.user!.id, actorRole: "admin", action: "subscription.created", targetId: String(subscription._id), targetType: "Subscription" });
-  res.status(201).json({ success: true, message: "Subscription created successfully", data: serializeSubscription(subscription) });
+
+  const subscriptions = await Subscription.create(subscriptionsToCreate);
+  await Promise.all(subscriptions.map((subscription) => createAuditLog({
+    actorId: req.user!.id,
+    actorRole: "admin",
+    action: "subscription.created",
+    targetId: String(subscription._id),
+    targetType: "Subscription",
+  })));
+
+  const isBatch = Array.isArray(req.body);
+  res.status(201).json({
+    success: true,
+    message: isBatch ? `${subscriptions.length} subscriptions created successfully` : "Subscription created successfully",
+    data: isBatch ? subscriptions.map((subscription) => serializeSubscription(subscription)) : serializeSubscription(subscriptions[0]),
+  });
 });
 
 export const listSubscriptions = asyncHandler(async (req: Request, res: Response) => {
