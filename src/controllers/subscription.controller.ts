@@ -113,6 +113,7 @@ export const createSubscription = asyncHandler(async (req: Request, res: Respons
   res.status(201).json({
     success: true,
     message: isBatch ? `${subscriptions.length} subscriptions created successfully` : "Subscription created successfully",
+    uploadedCount: subscriptions.length,
     data: isBatch ? subscriptions.map((subscription) => serializeSubscription(subscription)) : serializeSubscription(subscriptions[0]),
   });
 });
