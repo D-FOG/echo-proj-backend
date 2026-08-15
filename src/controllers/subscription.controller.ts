@@ -13,6 +13,9 @@ type SubscriptionInput = {
   customerId?: string;
   customerName?: string;
   iucNumber?: string;
+  tagId?: string;
+  serialNumber?: string;
+  model?: string;
   provider?: string;
   bouquet?: string;
   startDate?: string;
@@ -59,18 +62,22 @@ const validateRange = (startDate: Date, endDate: Date) => {
 
 export const createSubscription = asyncHandler(async (req: Request, res: Response) => {
   const input = req.body as SubscriptionInput;
-  if (!input.customerName?.trim() || !input.iucNumber?.trim() || !input.provider?.trim() || !input.bouquet?.trim()) {
-    throw new ApiError(400, "customerName, iucNumber, provider, and bouquet are required");
-  }
+  if (!input.iucNumber?.trim()) throw new ApiError(400, "iucNumber is required");
+  if (!input.startDate) throw new ApiError(400, "startDate is required");
+  if (input.durationDays === undefined) throw new ApiError(400, "durationDays is required");
+  if (input.durationMonths !== undefined || input.endDate !== undefined) throw new ApiError(400, "Use durationDays when creating a subscription");
   if (input.customerId && !mongoose.Types.ObjectId.isValid(input.customerId)) throw new ApiError(400, "customerId is invalid");
 
-  const startDate = ensureDate(input.startDate, "startDate") ?? new Date();
+  const startDate = ensureDate(input.startDate, "startDate")!;
   const endDate = getEndDate(input, startDate, true)!;
   validateRange(startDate, endDate);
   const subscription = await Subscription.create({
     customer: input.customerId,
     customerName: input.customerName,
     iucNumber: input.iucNumber,
+    tagId: input.tagId,
+    serialNumber: input.serialNumber,
+    model: input.model,
     provider: input.provider,
     bouquet: input.bouquet,
     startDate,
@@ -91,7 +98,13 @@ export const listSubscriptions = asyncHandler(async (req: Request, res: Response
   const status = req.query.status as SubscriptionStatus | undefined;
   const filter: Record<string, any> = {};
   if (provider) filter.provider = { $regex: `^${provider.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
-  if (search) filter.$or = [{ customerName: { $regex: search, $options: "i" } }, { iucNumber: { $regex: search, $options: "i" } }];
+  if (search) filter.$or = [
+    { customerName: { $regex: search, $options: "i" } },
+    { iucNumber: { $regex: search, $options: "i" } },
+    { tagId: { $regex: search, $options: "i" } },
+    { serialNumber: { $regex: search, $options: "i" } },
+    { model: { $regex: search, $options: "i" } },
+  ];
   const now = new Date();
   const day = 24 * 60 * 60 * 1000;
   if (status === "expired") filter.endDate = { $lt: now };
@@ -125,7 +138,7 @@ export const updateSubscription = asyncHandler(async (req: Request, res: Respons
   const recalculatedEndDate = getEndDate(input, startDate, false);
   const endDate = recalculatedEndDate ?? subscription.endDate;
   validateRange(startDate, endDate);
-  const fields: Array<keyof SubscriptionInput> = ["customerName", "iucNumber", "provider", "bouquet", "notes", "durationDays", "durationMonths"];
+  const fields: Array<keyof SubscriptionInput> = ["customerName", "iucNumber", "tagId", "serialNumber", "model", "provider", "bouquet", "notes", "durationDays", "durationMonths"];
   fields.forEach((field) => { if (input[field] !== undefined) (subscription as any)[field] = input[field]; });
   if (input.endDate !== undefined) {
     subscription.durationDays = undefined;

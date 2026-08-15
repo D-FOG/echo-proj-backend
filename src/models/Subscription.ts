@@ -3,10 +3,13 @@ import { Schema, model } from "mongoose";
 const subscriptionSchema = new Schema(
   {
     customer: { type: Schema.Types.ObjectId, ref: "User", index: true },
-    customerName: { type: String, required: true, trim: true, index: true },
+    customerName: { type: String, trim: true, index: true },
     iucNumber: { type: String, required: true, trim: true, index: true },
-    provider: { type: String, required: true, trim: true, index: true },
-    bouquet: { type: String, required: true, trim: true },
+    tagId: { type: String, trim: true, index: true },
+    serialNumber: { type: String, trim: true, index: true },
+    model: { type: String, trim: true },
+    provider: { type: String, trim: true, index: true },
+    bouquet: { type: String, trim: true },
     startDate: { type: Date, required: true, default: Date.now },
     endDate: { type: Date, required: true, index: true },
     durationDays: { type: Number, min: 1 },
