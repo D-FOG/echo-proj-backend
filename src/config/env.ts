@@ -35,4 +35,8 @@ export const env = {
   bankAccountName: process.env.BANK_ACCOUNT_NAME ?? "Echolalax Global",
   bankAccountNumber: process.env.BANK_ACCOUNT_NUMBER ?? "0000000000",
   bankName: process.env.BANK_NAME ?? "First Bank",
+  userQuickLoginEmail: process.env.USER_QUICK_LOGIN_EMAIL ?? "",
+  userQuickLoginPasscode: process.env.USER_QUICK_LOGIN_PASSCODE ?? "",
+  adminQuickLoginEmail: process.env.ADMIN_QUICK_LOGIN_EMAIL ?? "",
+  adminQuickLoginPasscode: process.env.ADMIN_QUICK_LOGIN_PASSCODE ?? "",
 };

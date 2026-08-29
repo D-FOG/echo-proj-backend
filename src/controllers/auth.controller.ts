@@ -159,6 +159,70 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+export const quickLogin = asyncHandler(async (req: Request, res: Response) => {
+  const { portal, passcode } = req.body as {
+    portal?: "user" | "admin";
+    passcode?: string;
+  };
+
+  if (!portal || !["user", "admin"].includes(portal)) {
+    throw new ApiError(400, "portal must be user or admin");
+  }
+
+  if (!passcode) {
+    throw new ApiError(400, "Passcode is required");
+  }
+
+  const expectedEmail = portal === "admin" ? env.adminQuickLoginEmail : env.userQuickLoginEmail;
+  const expectedPasscode = portal === "admin" ? env.adminQuickLoginPasscode : env.userQuickLoginPasscode;
+
+  if (!expectedEmail || !expectedPasscode) {
+    throw new ApiError(503, "Quick sign-in is not configured");
+  }
+
+  if (passcode !== expectedPasscode) {
+    throw new ApiError(401, "Invalid passcode");
+  }
+
+  const user = await User.findOne({ email: expectedEmail.toLowerCase() });
+
+  if (!user) {
+    throw new ApiError(404, "Configured quick sign-in account was not found");
+  }
+
+  if (user.role !== portal) {
+    throw new ApiError(403, `Configured account does not have ${portal} access`);
+  }
+
+  if (user.status !== "active") {
+    throw new ApiError(403, "Account is not active");
+  }
+
+  const token = signToken({
+    id: String(user._id),
+    role: user.role as "user" | "admin",
+    tokenVersion: user.tokenVersion as number,
+  });
+
+  await createAuditLog({
+    actorId: String(user._id),
+    actorRole: user.role as "user" | "admin",
+    action: "auth.quick_login",
+    targetId: String(user._id),
+    targetType: "User",
+    metadata: { portal },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Quick sign-in successful",
+    data: {
+      token,
+      user: sanitizeUser(user.toObject()),
+    },
+  });
+});
+
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   if (req.user) {
     await User.findByIdAndUpdate(req.user.id, {

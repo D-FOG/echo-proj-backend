@@ -50,15 +50,23 @@ const sendAdminNotification = async (createdBy: string, title: string, message: 
 const serializeSubscription = (subscription: any, now = new Date()) => {
   const item = subscription.toObject ? subscription.toObject() : subscription;
   const endDate = new Date(item.endDate);
-  return { ...item, remainingDays: getRemainingDays(endDate, now), status: getSubscriptionStatus(endDate, now) };
+  const lifecycleStatus = item.lifecycleStatus ?? "active";
+  return {
+    ...item,
+    categoryName: item.categoryName || "General",
+    lifecycleStatus,
+    remainingDays: lifecycleStatus === "pending" ? 0 : getRemainingDays(endDate, now),
+    status: lifecycleStatus === "pending" ? "pending" : getSubscriptionStatus(endDate, now),
+  };
 };
 
-const getSubscriptionStatusFilter = (status: SubscriptionStatus, now: Date): Record<string, unknown> => {
+const getSubscriptionStatusFilter = (status: SubscriptionStatus | "pending", now: Date): Record<string, unknown> => {
   const day = 24 * 60 * 60 * 1000;
-  if (status === "expired") return { endDate: { $lt: now } };
-  if (status === "expiring_soon") return { endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } };
-  if (status === "warning") return { endDate: { $gt: new Date(now.getTime() + 5 * day), $lte: new Date(now.getTime() + 15 * day) } };
-  return { endDate: { $gt: new Date(now.getTime() + 15 * day) } };
+  if (status === "pending") return { lifecycleStatus: "pending" };
+  if (status === "expired") return { lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } };
+  if (status === "expiring_soon") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } };
+  if (status === "warning") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 5 * day), $lte: new Date(now.getTime() + 15 * day) } };
+  return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } };
 };
 
 export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Response) => {
@@ -66,10 +74,11 @@ export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Re
   const now = new Date();
   const day = 24 * 60 * 60 * 1000;
   const baseFilter = { customer: userId };
-  const [active, expiringSoon, expired, totalDecoders] = await Promise.all([
-    Subscription.countDocuments({ ...baseFilter, endDate: { $gt: new Date(now.getTime() + 15 * day) } }),
-    Subscription.countDocuments({ ...baseFilter, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } }),
-    Subscription.countDocuments({ ...baseFilter, endDate: { $lt: now } }),
+  const [active, expiringSoon, expired, pending, totalDecoders] = await Promise.all([
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } }),
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } }),
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } }),
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: "pending" }),
     Subscription.countDocuments(baseFilter),
   ]);
   const notices = await Subscription.find({ ...baseFilter, endDate: { $gte: now, $lte: new Date(now.getTime() + 15 * day) } }).sort({ endDate: 1 }).lean();
@@ -80,20 +89,28 @@ export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Re
   });
   const expiredSubscriptions = await Subscription.find({ ...baseFilter, endDate: { $lt: now } }).sort({ endDate: -1 }).limit(10).lean();
   notifications.push(...expiredSubscriptions.map((subscription) => ({ subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays: getRemainingDays(new Date(subscription.endDate), now), status: "expired" as SubscriptionStatus, message: `Your decoder ${subscription.iucNumber} subscription has expired.` })));
-  res.status(200).json({ success: true, data: { active, expiringSoon, expired, totalDecoders, notifications } });
+  res.status(200).json({ success: true, data: { active, expiringSoon, expired, pending, totalDecoders, notifications } });
 });
 
 export const listSubscriptions = asyncHandler(async (req: Request, res: Response) => {
   const { page, limit, skip } = getPagination(req.query.page as string, req.query.limit as string);
   const search = (req.query.search as string | undefined)?.trim();
   const provider = (req.query.provider as string | undefined)?.trim();
-  const status = req.query.status as SubscriptionStatus | undefined;
+  const categoryName = (req.query.categoryName as string | undefined)?.trim();
+  const status = req.query.status as SubscriptionStatus | "pending" | undefined;
   const now = new Date();
   const filter: Record<string, any> = { customer: ensureObjectId(req.user!.id) };
-  if (search) filter.iucNumber = { $regex: search, $options: "i" };
+  if (search) filter.$or = [
+    { iucNumber: { $regex: search, $options: "i" } },
+    { categoryName: { $regex: search, $options: "i" } },
+    { tagId: { $regex: search, $options: "i" } },
+    { serialNumber: { $regex: search, $options: "i" } },
+    { model: { $regex: search, $options: "i" } },
+  ];
   if (provider) filter.provider = { $regex: provider, $options: "i" };
+  if (categoryName) filter.categoryName = { $regex: `^${categoryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
   if (status) {
-    if (!(["active", "warning", "expiring_soon", "expired"] as string[]).includes(status)) throw new ApiError(400, "Invalid status filter");
+    if (!(["active", "warning", "expiring_soon", "expired", "pending"] as string[]).includes(status)) throw new ApiError(400, "Invalid status filter");
     Object.assign(filter, getSubscriptionStatusFilter(status, now));
   }
   const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
@@ -128,6 +145,21 @@ export const requestSubscriptionRenewal = asyncHandler(async (req: Request, res:
   await sendAdminNotification(req.user!.id, "Decoder renewal requested", `${req.user!.id} requested a renewal for IUC ${subscription.iucNumber}.`);
   await createAuditLog({ actorId: req.user!.id, actorRole: "user", action: "subscription.renewal_requested", targetId: String(request._id), targetType: "RenewalRequest", metadata: { subscriptionId: String(subscription._id) } });
   res.status(201).json({ success: true, message: "Your renewal request has been sent to the administrators", data: request });
+});
+
+export const requestSubscriptionActivation = asyncHandler(async (req: Request, res: Response) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new ApiError(400, "Invalid subscription id");
+  const userId = ensureObjectId(req.user!.id);
+  const subscription = await Subscription.findOne({ _id: req.params.id, customer: userId });
+  if (!subscription) throw new ApiError(404, "Subscription not found");
+  if ((subscription as any).lifecycleStatus !== "pending") throw new ApiError(400, "This decoder is not pending activation");
+  const existing = await RenewalRequest.findOne({ subscription: subscription._id, user: userId, requestType: "activation", status: "pending" });
+  if (existing) throw new ApiError(409, "An activation request is already pending for this decoder");
+  const message = typeof req.body.message === "string" ? req.body.message.trim() : undefined;
+  const request = await RenewalRequest.create({ subscription: subscription._id, user: userId, requestType: "activation", message });
+  await sendAdminNotification(req.user!.id, "Decoder activation requested", `${req.user!.id} requested activation for IUC ${subscription.iucNumber}.`);
+  await createAuditLog({ actorId: req.user!.id, actorRole: "user", action: "subscription.activation_requested", targetId: String(request._id), targetType: "RenewalRequest", metadata: { subscriptionId: String(subscription._id) } });
+  res.status(201).json({ success: true, message: "Your activation request has been sent to the administrators", data: request });
 });
 
 const notifyAdminsByEmail = async (subject: string, html: string) => {

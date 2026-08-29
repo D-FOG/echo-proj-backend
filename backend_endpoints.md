@@ -11,6 +11,7 @@ These handle sessions and onboarding for both regular users and administrators.
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/auth/register` | Create a new user account | `{ name, email, password, phone? }` |
 | `POST` | `/api/auth/login` | Authenticate user/admin (returns JWT or sets cookie) | `{ email, password }` |
+| `POST` | `/api/auth/quick-login` | Authenticate a configured single user/admin by passcode | `{ portal: "user" \| "admin", passcode }` |
 | `POST` | `/api/auth/logout` | Invalidate current session/token | None |
 | `GET` | `/api/auth/me` | Fetch authenticated user's active session profile | Authorization Header |
 | `POST` | `/api/auth/reset-password` | Initiate password reset via email link | `{ email }` |
@@ -35,6 +36,9 @@ Endpoints serving the standard `/dashboard/*` frontend routes.
 | `GET` | `/api/user/automations/:id` | Get specifics for a single automation schedule. |
 | `PUT` | `/api/user/automations/:id/status`| Pause or Resume an active automation. |
 | `DELETE`| `/api/user/automations/:id` | Cancel/delete an automation entirely. |
+| `GET` | `/api/user/subscriptions` | List user decoder subscriptions with `search`, `provider`, `categoryName`, and `status` filters. |
+| `POST` | `/api/user/subscriptions/:id/activation-requests` | Request admin activation for a pending decoder subscription. |
+| `POST` | `/api/user/subscriptions/:id/renewal-requests` | Request admin renewal review for a decoder subscription. |
 
 ### Profile
 | Method | Endpoint | Description |
@@ -64,6 +68,9 @@ Endpoints serving the `/admin/*` frontend routes. Requires Admin-level authoriza
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `GET` | `/api/admin/automations` | List platform-wide automations (supports `?service=` and `?status=` filters). |
+| `GET` | `/api/subscriptions` | List decoder subscriptions. Supports `search`, `provider`, `categoryName`, `status`. |
+| `POST` | `/api/subscriptions` | Create one or many decoder subscriptions. Supports `categoryName` and `lifecycleStatus`. |
+| `PUT` | `/api/subscriptions/:id` | Update decoder details, category, dates, duration, or pending/active lifecycle. |
 
 ### Contact & Support Messages
 | Method | Endpoint | Description |

@@ -22,6 +22,7 @@ import {
   getSubscriptionOverview,
   listSubscriptions as listUserSubscriptions,
   getSubscription as getUserSubscription,
+  requestSubscriptionActivation,
   requestSubscriptionRenewal,
 } from "../controllers/user.controller";
 import { authenticate, authorize } from "../middleware/auth.middleware";
@@ -34,6 +35,7 @@ router.get("/overview", getOverview);
 router.get("/subscriptions/overview", getSubscriptionOverview);
 router.get("/subscriptions", listUserSubscriptions);
 router.get("/subscriptions/:id", getUserSubscription);
+router.post("/subscriptions/:id/activation-requests", requestSubscriptionActivation);
 router.post("/subscriptions/:id/renewal-requests", requestSubscriptionRenewal);
 router.get("/transactions", getTransactions);
 router.post("/wallet/fund", fundWallet);
