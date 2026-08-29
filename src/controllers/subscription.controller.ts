@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 
 import Subscription from "../models/Subscription";
 import RenewalRequest from "../models/RenewalRequest";
+import User from "../models/User";
 import { asyncHandler } from "../utils/async-handler";
 import { ApiError } from "../utils/api-error";
 import { getPagination } from "../utils/pagination";
@@ -18,6 +19,7 @@ const normalizeCategoryName = (value: string | undefined) => {
 
 type SubscriptionInput = {
   customerId?: string;
+  customerEmail?: string;
   customerName?: string;
   categoryName?: string;
   iucNumber?: string;
@@ -77,20 +79,47 @@ const validateRange = (startDate: Date, endDate: Date) => {
   if (endDate.getTime() <= startDate.getTime()) throw new ApiError(400, "endDate must be after startDate");
 };
 
+type SubscriptionCustomer = {
+  _id: mongoose.Types.ObjectId;
+  name?: string;
+  email?: string;
+};
+
+const normalizeCustomerEmail = (value: string | undefined) => value?.trim().toLowerCase();
+
 export const createSubscription = asyncHandler(async (req: Request, res: Response) => {
   const inputs = Array.isArray(req.body) ? req.body : [req.body];
   if (inputs.length === 0) throw new ApiError(400, "Provide at least one subscription");
 
-  const subscriptionsToCreate = inputs.map((rawInput, index) => {
+  const normalizedInputs = inputs.map((rawInput, index) => {
     if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
       throw new ApiError(400, `Subscription ${index + 1} must be a JSON object`);
     }
-    const input = rawInput as SubscriptionInput;
+
+    return rawInput as SubscriptionInput;
+  });
+  const customerEmails = Array.from(new Set(
+    normalizedInputs
+      .map((input) => normalizeCustomerEmail(input.customerEmail))
+      .filter((email): email is string => Boolean(email)),
+  ));
+  const usersByEmail = new Map<string, SubscriptionCustomer>();
+
+  if (customerEmails.length > 0) {
+    const users = await User.find({ email: { $in: customerEmails } }).select("_id name email").lean();
+    users.forEach((user) => usersByEmail.set(String(user.email).toLowerCase(), user as SubscriptionCustomer));
+  }
+
+  const subscriptionsToCreate = normalizedInputs.map((input, index) => {
     try {
       if (!input.iucNumber?.trim()) throw new ApiError(400, "iucNumber is required");
       if (input.durationMonths !== undefined || input.endDate !== undefined) throw new ApiError(400, "Use durationDays when creating a subscription");
       if (input.customerId && !mongoose.Types.ObjectId.isValid(input.customerId)) throw new ApiError(400, "customerId is invalid");
       if (input.lifecycleStatus && !["pending", "active"].includes(input.lifecycleStatus)) throw new ApiError(400, "lifecycleStatus must be pending or active");
+      const customerEmail = normalizeCustomerEmail(input.customerEmail);
+      const customer = customerEmail ? usersByEmail.get(customerEmail) : undefined;
+      if (customerEmail && !customer) throw new ApiError(404, `No user account was found for customerEmail ${customerEmail}`);
+      if (input.customerId && customer && String(customer._id) !== input.customerId) throw new ApiError(400, "customerId does not match customerEmail");
       const lifecycleStatus = input.lifecycleStatus ?? "active";
       const isPending = lifecycleStatus === "pending";
       if (!isPending && !input.startDate) throw new ApiError(400, "startDate is required for active subscriptions");
@@ -100,8 +129,8 @@ export const createSubscription = asyncHandler(async (req: Request, res: Respons
       const endDate = startDate ? getEndDate(input, startDate, !isPending) : undefined;
       if (startDate && endDate) validateRange(startDate, endDate);
       return {
-        customer: input.customerId,
-        customerName: input.customerName,
+        customer: input.customerId ?? customer?._id,
+        customerName: input.customerName ?? customer?.name,
         categoryName: normalizeCategoryName(input.categoryName),
         iucNumber: input.iucNumber.trim(),
         tagId: input.tagId,
@@ -187,6 +216,12 @@ export const updateSubscription = asyncHandler(async (req: Request, res: Respons
   const input = req.body as SubscriptionInput;
   if (input.customerId !== undefined && (!input.customerId || !mongoose.Types.ObjectId.isValid(input.customerId))) throw new ApiError(400, "customerId is invalid");
   if (input.lifecycleStatus && !["pending", "active"].includes(input.lifecycleStatus)) throw new ApiError(400, "lifecycleStatus must be pending or active");
+  const customerEmail = normalizeCustomerEmail(input.customerEmail);
+  const customer = customerEmail
+    ? await User.findOne({ email: customerEmail }).select("_id name email").lean<SubscriptionCustomer>()
+    : undefined;
+  if (customerEmail && !customer) throw new ApiError(404, `No user account was found for customerEmail ${customerEmail}`);
+  if (input.customerId && customer && String(customer._id) !== input.customerId) throw new ApiError(400, "customerId does not match customerEmail");
   const nextLifecycleStatus = input.lifecycleStatus ?? subscription.lifecycleStatus ?? "active";
   const startDate = ensureDate(input.startDate, "startDate") ?? subscription.startDate;
   if (nextLifecycleStatus === "active" && !startDate) throw new ApiError(400, "startDate is required for active subscriptions");
@@ -205,7 +240,10 @@ export const updateSubscription = asyncHandler(async (req: Request, res: Respons
   } else if (input.durationMonths !== undefined) {
     subscription.durationDays = undefined;
   }
-  if (input.customerId !== undefined) subscription.customer = new mongoose.Types.ObjectId(input.customerId);
+  if (input.customerId !== undefined || customer) {
+    subscription.customer = new mongoose.Types.ObjectId(input.customerId ?? String(customer!._id));
+  }
+  if (customer && input.customerName === undefined) subscription.customerName = customer.name;
   subscription.startDate = startDate;
   subscription.endDate = endDate;
   await subscription.save();

@@ -69,8 +69,8 @@ Endpoints serving the `/admin/*` frontend routes. Requires Admin-level authoriza
 | :--- | :--- | :--- |
 | `GET` | `/api/admin/automations` | List platform-wide automations (supports `?service=` and `?status=` filters). |
 | `GET` | `/api/subscriptions` | List decoder subscriptions. Supports `search`, `provider`, `categoryName`, `status`. |
-| `POST` | `/api/subscriptions` | Create one or many decoder subscriptions. Supports `categoryName` and `lifecycleStatus`. |
-| `PUT` | `/api/subscriptions/:id` | Update decoder details, category, dates, duration, or pending/active lifecycle. |
+| `POST` | `/api/subscriptions` | Create one or many decoder subscriptions. Supports `categoryName`, `lifecycleStatus`, and `customerEmail` for automatic account linking. |
+| `PUT` | `/api/subscriptions/:id` | Update decoder details, category, dates, duration, pending/active lifecycle, or linked account via `customerId`/`customerEmail`. |
 
 ### Contact & Support Messages
 | Method | Endpoint | Description |
