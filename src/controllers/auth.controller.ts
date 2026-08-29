@@ -30,6 +30,8 @@ const sanitizeUser = (user: Record<string, unknown>) => ({
   createdAt: user.createdAt,
 });
 
+const normalizeQuickLoginValue = (value: string | undefined) => value?.trim() ?? "";
+
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { name, email, password, phone } = req.body as {
     name?: string;
@@ -173,14 +175,14 @@ export const quickLogin = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(400, "Passcode is required");
   }
 
-  const expectedEmail = portal === "admin" ? env.adminQuickLoginEmail : env.userQuickLoginEmail;
-  const expectedPasscode = portal === "admin" ? env.adminQuickLoginPasscode : env.userQuickLoginPasscode;
+  const expectedEmail = normalizeQuickLoginValue(portal === "admin" ? env.adminQuickLoginEmail : env.userQuickLoginEmail);
+  const expectedPasscode = normalizeQuickLoginValue(portal === "admin" ? env.adminQuickLoginPasscode : env.userQuickLoginPasscode);
 
   if (!expectedEmail || !expectedPasscode) {
     throw new ApiError(503, "Quick sign-in is not configured");
   }
 
-  if (passcode !== expectedPasscode) {
+  if (passcode.trim() !== expectedPasscode) {
     throw new ApiError(401, "Invalid passcode");
   }
 
