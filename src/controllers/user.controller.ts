@@ -35,6 +35,12 @@ const addMonths = (date: Date, months: number): Date => {
 };
 
 const getSupportEmail = (): string => env.adminSupportEmail || "support@echolalax.com";
+const UNNAMED_CATEGORY = "No Name Yet";
+
+const normalizeCategoryName = (value: string | undefined) => {
+  const categoryName = value?.trim();
+  return !categoryName || categoryName === "General" ? UNNAMED_CATEGORY : categoryName;
+};
 
 const sendAdminNotification = async (createdBy: string, title: string, message: string) => {
   await Notification.create({
@@ -49,14 +55,15 @@ const sendAdminNotification = async (createdBy: string, title: string, message: 
 
 const serializeSubscription = (subscription: any, now = new Date()) => {
   const item = subscription.toObject ? subscription.toObject() : subscription;
-  const endDate = new Date(item.endDate);
   const lifecycleStatus = item.lifecycleStatus ?? "active";
+  const categoryName = normalizeCategoryName(item.categoryName);
+  const endDate = item.endDate ? new Date(item.endDate) : undefined;
   return {
     ...item,
-    categoryName: item.categoryName || "General",
+    categoryName,
     lifecycleStatus,
-    remainingDays: lifecycleStatus === "pending" ? 0 : getRemainingDays(endDate, now),
-    status: lifecycleStatus === "pending" ? "pending" : getSubscriptionStatus(endDate, now),
+    remainingDays: lifecycleStatus === "pending" || !endDate ? 0 : getRemainingDays(endDate, now),
+    status: lifecycleStatus === "pending" || !endDate ? "pending" : getSubscriptionStatus(endDate, now),
   };
 };
 
@@ -81,14 +88,15 @@ export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Re
     Subscription.countDocuments({ ...baseFilter, lifecycleStatus: "pending" }),
     Subscription.countDocuments(baseFilter),
   ]);
-  const notices = await Subscription.find({ ...baseFilter, endDate: { $gte: now, $lte: new Date(now.getTime() + 15 * day) } }).sort({ endDate: 1 }).lean();
+  const notices = await Subscription.find({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 15 * day) } }).sort({ endDate: 1 }).lean();
   const notifications = notices.map((subscription) => {
-    const remainingDays = getRemainingDays(new Date(subscription.endDate), now);
-    const status = getSubscriptionStatus(new Date(subscription.endDate), now);
+    const endDate = new Date(subscription.endDate as Date);
+    const remainingDays = getRemainingDays(endDate, now);
+    const status = getSubscriptionStatus(endDate, now);
     return { subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays, status, message: status === "expiring_soon" ? `Your decoder ${subscription.iucNumber} expires in ${remainingDays} day(s).` : `Your decoder ${subscription.iucNumber} expires in ${remainingDays} day(s).` };
   });
   const expiredSubscriptions = await Subscription.find({ ...baseFilter, endDate: { $lt: now } }).sort({ endDate: -1 }).limit(10).lean();
-  notifications.push(...expiredSubscriptions.map((subscription) => ({ subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays: getRemainingDays(new Date(subscription.endDate), now), status: "expired" as SubscriptionStatus, message: `Your decoder ${subscription.iucNumber} subscription has expired.` })));
+  notifications.push(...expiredSubscriptions.map((subscription) => ({ subscriptionId: String(subscription._id), iucNumber: subscription.iucNumber, remainingDays: getRemainingDays(new Date(subscription.endDate as Date), now), status: "expired" as SubscriptionStatus, message: `Your decoder ${subscription.iucNumber} subscription has expired.` })));
   res.status(200).json({ success: true, data: { active, expiringSoon, expired, pending, totalDecoders, notifications } });
 });
 

@@ -9,6 +9,13 @@ import { getPagination } from "../utils/pagination";
 import { addMonths, getRemainingDays, getSubscriptionStatus, type SubscriptionStatus } from "../utils/subscription-status";
 import { createAuditLog } from "../utils/audit";
 
+const UNNAMED_CATEGORY = "No Name Yet";
+
+const normalizeCategoryName = (value: string | undefined) => {
+  const categoryName = value?.trim();
+  return !categoryName || categoryName === "General" ? UNNAMED_CATEGORY : categoryName;
+};
+
 type SubscriptionInput = {
   customerId?: string;
   customerName?: string;
@@ -36,14 +43,15 @@ const ensureDate = (value: string | undefined, field: string): Date | undefined 
 
 const serializeSubscription = (subscription: any, now = new Date()) => {
   const item = subscription.toObject ? subscription.toObject() : subscription;
-  const endDate = new Date(item.endDate);
   const lifecycleStatus = item.lifecycleStatus ?? "active";
+  const categoryName = normalizeCategoryName(item.categoryName);
+  const endDate = item.endDate ? new Date(item.endDate) : undefined;
   return {
     ...item,
-    categoryName: item.categoryName || "General",
+    categoryName,
     lifecycleStatus,
-    remainingDays: lifecycleStatus === "pending" ? 0 : getRemainingDays(endDate, now),
-    status: lifecycleStatus === "pending" ? "pending" : getSubscriptionStatus(endDate, now),
+    remainingDays: lifecycleStatus === "pending" || !endDate ? 0 : getRemainingDays(endDate, now),
+    status: lifecycleStatus === "pending" || !endDate ? "pending" : getSubscriptionStatus(endDate, now),
   };
 };
 
@@ -80,19 +88,21 @@ export const createSubscription = asyncHandler(async (req: Request, res: Respons
     const input = rawInput as SubscriptionInput;
     try {
       if (!input.iucNumber?.trim()) throw new ApiError(400, "iucNumber is required");
-      if (!input.startDate) throw new ApiError(400, "startDate is required");
-      if (input.durationDays === undefined) throw new ApiError(400, "durationDays is required");
       if (input.durationMonths !== undefined || input.endDate !== undefined) throw new ApiError(400, "Use durationDays when creating a subscription");
       if (input.customerId && !mongoose.Types.ObjectId.isValid(input.customerId)) throw new ApiError(400, "customerId is invalid");
       if (input.lifecycleStatus && !["pending", "active"].includes(input.lifecycleStatus)) throw new ApiError(400, "lifecycleStatus must be pending or active");
+      const lifecycleStatus = input.lifecycleStatus ?? "active";
+      const isPending = lifecycleStatus === "pending";
+      if (!isPending && !input.startDate) throw new ApiError(400, "startDate is required for active subscriptions");
+      if (!isPending && input.durationDays === undefined) throw new ApiError(400, "durationDays is required for active subscriptions");
 
-      const startDate = ensureDate(input.startDate, "startDate")!;
-      const endDate = getEndDate(input, startDate, true)!;
-      validateRange(startDate, endDate);
+      const startDate = ensureDate(input.startDate, "startDate");
+      const endDate = startDate ? getEndDate(input, startDate, !isPending) : undefined;
+      if (startDate && endDate) validateRange(startDate, endDate);
       return {
         customer: input.customerId,
         customerName: input.customerName,
-        categoryName: input.categoryName?.trim() || "General",
+        categoryName: normalizeCategoryName(input.categoryName),
         iucNumber: input.iucNumber.trim(),
         tagId: input.tagId,
         serialNumber: input.serialNumber,
@@ -102,7 +112,7 @@ export const createSubscription = asyncHandler(async (req: Request, res: Respons
         startDate,
         endDate,
         durationDays: input.durationDays,
-        lifecycleStatus: input.lifecycleStatus ?? "active",
+        lifecycleStatus,
         notes: input.notes,
         createdBy: req.user!.id,
       };
@@ -177,12 +187,16 @@ export const updateSubscription = asyncHandler(async (req: Request, res: Respons
   const input = req.body as SubscriptionInput;
   if (input.customerId !== undefined && (!input.customerId || !mongoose.Types.ObjectId.isValid(input.customerId))) throw new ApiError(400, "customerId is invalid");
   if (input.lifecycleStatus && !["pending", "active"].includes(input.lifecycleStatus)) throw new ApiError(400, "lifecycleStatus must be pending or active");
+  const nextLifecycleStatus = input.lifecycleStatus ?? subscription.lifecycleStatus ?? "active";
   const startDate = ensureDate(input.startDate, "startDate") ?? subscription.startDate;
-  const recalculatedEndDate = getEndDate(input, startDate, false);
+  if (nextLifecycleStatus === "active" && !startDate) throw new ApiError(400, "startDate is required for active subscriptions");
+  const recalculatedEndDate = startDate ? getEndDate(input, startDate, nextLifecycleStatus === "active" && !subscription.endDate) : undefined;
   const endDate = recalculatedEndDate ?? subscription.endDate;
-  validateRange(startDate, endDate);
+  if (nextLifecycleStatus === "active" && !endDate) throw new ApiError(400, "durationDays is required for active subscriptions");
+  if (startDate && endDate) validateRange(startDate, endDate);
   const fields: Array<keyof SubscriptionInput> = ["customerName", "categoryName", "iucNumber", "tagId", "serialNumber", "model", "provider", "bouquet", "notes", "durationDays", "durationMonths", "lifecycleStatus"];
   fields.forEach((field) => { if (input[field] !== undefined) (subscription as any)[field] = input[field]; });
+  if (input.categoryName !== undefined) subscription.categoryName = normalizeCategoryName(input.categoryName);
   if (input.endDate !== undefined) {
     subscription.durationDays = undefined;
     subscription.durationMonths = undefined;
