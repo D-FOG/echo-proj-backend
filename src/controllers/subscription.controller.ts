@@ -7,7 +7,7 @@ import User from "../models/User";
 import { asyncHandler } from "../utils/async-handler";
 import { ApiError } from "../utils/api-error";
 import { getPagination } from "../utils/pagination";
-import { addMonths, getRemainingDays, getSubscriptionStatus, type SubscriptionStatus } from "../utils/subscription-status";
+import { addMonths, EXPIRING_SOON_DAYS, getRemainingDays, getSubscriptionStatus, WARNING_DAYS, type SubscriptionStatus } from "../utils/subscription-status";
 import { createAuditLog } from "../utils/audit";
 
 const UNNAMED_CATEGORY = "No Name Yet";
@@ -189,9 +189,9 @@ export const listSubscriptions = asyncHandler(async (req: Request, res: Response
   const day = 24 * 60 * 60 * 1000;
   if (status === "pending") filter.lifecycleStatus = "pending";
   if (status === "expired") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } });
-  if (status === "expiring_soon") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } });
-  if (status === "warning") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 5 * day), $lte: new Date(now.getTime() + 15 * day) } });
-  if (status === "active") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } });
+  if (status === "expiring_soon") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + EXPIRING_SOON_DAYS * day) } });
+  if (status === "warning") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + EXPIRING_SOON_DAYS * day), $lte: new Date(now.getTime() + WARNING_DAYS * day) } });
+  if (status === "active") Object.assign(filter, { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + WARNING_DAYS * day) } });
   if (status && !["active", "warning", "expiring_soon", "expired", "pending"].includes(status)) throw new ApiError(400, "Invalid status filter");
 
   const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
@@ -263,8 +263,8 @@ export const getSubscriptionSummary = asyncHandler(async (_req: Request, res: Re
   const now = new Date();
   const day = 24 * 60 * 60 * 1000;
   const [active, expiringSoon, expired, pending, recentlyAdded] = await Promise.all([
-    Subscription.countDocuments({ lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } }),
-    Subscription.countDocuments({ lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } }),
+    Subscription.countDocuments({ lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + WARNING_DAYS * day) } }),
+    Subscription.countDocuments({ lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + EXPIRING_SOON_DAYS * day) } }),
     Subscription.countDocuments({ lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } }),
     Subscription.countDocuments({ lifecycleStatus: "pending" }),
     Subscription.find().populate("customer", "name email").populate("createdBy", "name email").sort({ createdAt: -1 }).limit(5),

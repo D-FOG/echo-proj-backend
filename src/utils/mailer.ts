@@ -81,15 +81,15 @@ const getZohoAccessToken = async () => {
   return tokenCache.token;
 };
 
-export const sendMail = async ({ to, subject, text, html }: MailPayload) => {
+export const sendMail = async ({ to, subject, text, html }: MailPayload): Promise<boolean> => {
   if (!canSendMail) {
     console.warn("Zoho mailer not configured. Skipping email:", subject);
-    return;
+    return false;
   }
 
   if (!html && !text) {
     console.warn("Skipping email with no content:", subject);
-    return;
+    return false;
   }
 
   try {
@@ -101,7 +101,9 @@ export const sendMail = async ({ to, subject, text, html }: MailPayload) => {
       content: html ?? text ?? "",
       mailFormat: html ? "html" : "plaintext",
     });
+    return true;
   } catch (error) {
     console.error("Failed to send email:", subject, error);
+    return false;
   }
 };

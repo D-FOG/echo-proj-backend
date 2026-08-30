@@ -12,6 +12,13 @@ const getEnv = (key: string, fallback?: string): string => {
   return value;
 };
 
+const getOptionalNumberEnv = (key: string, fallback: number): number => {
+  const rawValue = process.env[key];
+  if (!rawValue) return fallback;
+  const value = Number(rawValue);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
 export const env = {
   port: Number(process.env.PORT ?? 5000),
   mongodbUri: getEnv("MONGODB_URI"),
@@ -39,4 +46,7 @@ export const env = {
   userQuickLoginPasscode: process.env.USER_QUICK_LOGIN_PASSCODE ?? "",
   adminQuickLoginEmail: process.env.ADMIN_QUICK_LOGIN_EMAIL ?? "",
   adminQuickLoginPasscode: process.env.ADMIN_QUICK_LOGIN_PASSCODE ?? "",
+  subscriptionReminderEnabled: process.env.SUBSCRIPTION_REMINDER_ENABLED !== "false",
+  subscriptionReminderIntervalMinutes: getOptionalNumberEnv("SUBSCRIPTION_REMINDER_INTERVAL_MINUTES", 24 * 60),
+  subscriptionReminderBatchSize: getOptionalNumberEnv("SUBSCRIPTION_REMINDER_BATCH_SIZE", 200),
 };

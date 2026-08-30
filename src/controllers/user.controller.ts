@@ -16,7 +16,7 @@ import { ApiError } from "../utils/api-error";
 import { sendMail } from "../utils/mailer";
 import { getPagination } from "../utils/pagination";
 import { comparePassword, hashPassword } from "../utils/password";
-import { getRemainingDays, getSubscriptionStatus, type SubscriptionStatus } from "../utils/subscription-status";
+import { EXPIRING_SOON_DAYS, getRemainingDays, getSubscriptionStatus, WARNING_DAYS, type SubscriptionStatus } from "../utils/subscription-status";
 
 const ensureObjectId = (id: string): mongoose.Types.ObjectId => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -71,9 +71,9 @@ const getSubscriptionStatusFilter = (status: SubscriptionStatus | "pending", now
   const day = 24 * 60 * 60 * 1000;
   if (status === "pending") return { lifecycleStatus: "pending" };
   if (status === "expired") return { lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } };
-  if (status === "expiring_soon") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } };
-  if (status === "warning") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 5 * day), $lte: new Date(now.getTime() + 15 * day) } };
-  return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } };
+  if (status === "expiring_soon") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + EXPIRING_SOON_DAYS * day) } };
+  if (status === "warning") return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + EXPIRING_SOON_DAYS * day), $lte: new Date(now.getTime() + WARNING_DAYS * day) } };
+  return { lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + WARNING_DAYS * day) } };
 };
 
 export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Response) => {
@@ -82,13 +82,13 @@ export const getSubscriptionOverview = asyncHandler(async (req: Request, res: Re
   const day = 24 * 60 * 60 * 1000;
   const baseFilter = { customer: userId };
   const [active, expiringSoon, expired, pending, totalDecoders] = await Promise.all([
-    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + 15 * day) } }),
-    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 5 * day) } }),
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gt: new Date(now.getTime() + WARNING_DAYS * day) } }),
+    Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + EXPIRING_SOON_DAYS * day) } }),
     Subscription.countDocuments({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $lt: now } }),
     Subscription.countDocuments({ ...baseFilter, lifecycleStatus: "pending" }),
     Subscription.countDocuments(baseFilter),
   ]);
-  const notices = await Subscription.find({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + 15 * day) } }).sort({ endDate: 1 }).lean();
+  const notices = await Subscription.find({ ...baseFilter, lifecycleStatus: { $ne: "pending" }, endDate: { $gte: now, $lte: new Date(now.getTime() + WARNING_DAYS * day) } }).sort({ endDate: 1 }).lean();
   const notifications = notices.map((subscription) => {
     const endDate = new Date(subscription.endDate as Date);
     const remainingDays = getRemainingDays(endDate, now);
