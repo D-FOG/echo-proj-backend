@@ -1,7 +1,9 @@
+import { env } from "../config/env";
+
 export type SubscriptionStatus = "active" | "warning" | "expiring_soon" | "expired";
 
 export const EXPIRING_SOON_DAYS = 5;
-export const WARNING_DAYS = 9;
+export const WARNING_DAYS = env.subscriptionWarningDays;
 
 export const getRemainingDays = (endDate: Date, now = new Date()): number =>
   Math.ceil((endDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
