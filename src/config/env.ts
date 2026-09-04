@@ -25,12 +25,42 @@ const getOptionalListEnv = (key: string): string[] =>
     .map((value) => value.trim())
     .filter(Boolean);
 
+const getOptionalCategoryRecipientEnv = (key: string): Record<string, string[]> => {
+  const rawValue = process.env[key]?.trim();
+  if (!rawValue) return {};
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    return Object.entries(parsed).reduce<Record<string, string[]>>((result, [categoryName, emails]) => {
+      if (!Array.isArray(emails)) return result;
+
+      const cleanEmails = emails
+        .filter((email): email is string => typeof email === "string")
+        .map((email) => email.trim())
+        .filter(Boolean);
+
+      if (categoryName.trim() && cleanEmails.length > 0) {
+        result[categoryName.trim()] = cleanEmails;
+      }
+
+      return result;
+    }, {});
+  } catch {
+    console.warn(`Invalid JSON in ${key}. Category-specific reminder recipients will be ignored.`);
+    return {};
+  }
+};
+
+const clientUrl = process.env.CLIENT_URL ?? "http://localhost:3000";
+
 export const env = {
   port: Number(process.env.PORT ?? 5000),
   mongodbUri: getEnv("MONGODB_URI"),
   jwtSecret: getEnv("JWT_SECRET"),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
-  clientUrl: process.env.CLIENT_URL ?? "http://localhost:3000",
+  clientUrl,
   zohoAccountsBaseUrl: process.env.ZOHO_ACCOUNTS_BASE_URL ?? "https://accounts.zoho.com",
   zohoMailApiBaseUrl: process.env.ZOHO_MAIL_API_BASE_URL ?? "https://mail.zoho.com/api",
   zohoMailAccountId: process.env.ZOHO_MAIL_ACCOUNT_ID ?? "",
@@ -57,4 +87,8 @@ export const env = {
   subscriptionReminderIntervalMinutes: getOptionalNumberEnv("SUBSCRIPTION_REMINDER_INTERVAL_MINUTES", 24 * 60),
   subscriptionReminderBatchSize: getOptionalNumberEnv("SUBSCRIPTION_REMINDER_BATCH_SIZE", 200),
   subscriptionReminderRecipientEmails: getOptionalListEnv("SUBSCRIPTION_REMINDER_RECIPIENT_EMAILS"),
+  subscriptionReminderCategoryRecipientEmails: getOptionalCategoryRecipientEnv("SUBSCRIPTION_REMINDER_CATEGORY_RECIPIENT_EMAILS"),
+  subscriptionReminderDashboardUrl: process.env.SUBSCRIPTION_REMINDER_DASHBOARD_URL ?? `${clientUrl}/dashboard/subscriptions`,
+  subscriptionReminderAdminDashboardUrl: process.env.SUBSCRIPTION_REMINDER_ADMIN_DASHBOARD_URL ?? `${clientUrl}/admin/subscriptions`,
+  subscriptionReminderCompanyName: process.env.SUBSCRIPTION_REMINDER_COMPANY_NAME ?? "Echolalax Global Services Limited",
 };

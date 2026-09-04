@@ -6,11 +6,13 @@ import { sendMail } from "../utils/mailer";
 import { getRemainingDays, WARNING_DAYS } from "../utils/subscription-status";
 
 type ReminderType = "expiring" | "expired";
+type ReminderRecipientKind = "user" | "admin" | "category";
 
 type ReminderUser = {
   _id?: unknown;
   name?: string;
   email?: string;
+  role?: string;
   status?: string;
   notificationPreferences?: {
     emailNotifications?: boolean;
@@ -57,6 +59,7 @@ let timer: NodeJS.Timeout | undefined;
 let isRunning = false;
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const normalizeCategoryName = (categoryName: string) => categoryName.trim().toLowerCase();
 
 const formatDate = (date: Date) =>
   new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(date);
@@ -104,11 +107,7 @@ const groupReminderItems = (items: ReminderItem[]): ReminderEmailItem[] => {
       continue;
     }
 
-    const key = [
-      subscription.customer?._id ?? subscription.customerName ?? "customer",
-      subscription.provider ?? "provider",
-      subscription.categoryName,
-    ].join(":");
+    const key = [subscription.provider ?? "provider", normalizeCategoryName(subscription.categoryName ?? "")].join(":");
     const existing = grouped.get(key);
     if (existing) {
       existing.push(item);
@@ -151,6 +150,13 @@ const getTimingText = (item: ReminderEmailItem) => {
   return `currently has ${item.remainingDays} day(s) remaining`;
 };
 
+const buildReminderFooter = (dashboardUrl: string) => [
+  `<p>Kindly check the dashboard for a detailed overview and take the necessary action to ensure uninterrupted service: <a href="${dashboardUrl}">${dashboardUrl}</a></p>`,
+  "<p>Please disregard this automated reminder if the necessary action has already been taken.</p>",
+  "<p>Kind regards,</p>",
+  `<p>From: ${env.subscriptionReminderCompanyName}</p>`,
+];
+
 const describeEmailItem = (item: ReminderEmailItem) => {
   const provider = item.provider || "decoder";
   const timing = getTimingText(item);
@@ -187,10 +193,7 @@ const buildUserEmail = (name: string | undefined, items: ReminderItem[]) => {
       `<p>This is a friendly reminder that ${hasOneItem ? `one of your ${subscriptionLabel} is` : `some of your ${subscriptionLabel} are`} ${statusText}.</p>`,
       `<ul>${lines.join("")}</ul>`,
       extraCount > 0 ? `<p>And ${extraCount} more subscription group(s).</p>` : "",
-      `<p>Kindly check the dashboard for a detailed overview and take the necessary action to ensure uninterrupted service: <a href="${env.clientUrl}/dashboard/subscriptions">${env.clientUrl}/dashboard/subscriptions</a></p>`,
-      "<p>Please disregard this automated reminder if the necessary action has already been taken.</p>",
-      "<p>Kind regards,</p>",
-      "<p>From: Echolalax Global Services Limited</p>",
+      ...buildReminderFooter(env.subscriptionReminderDashboardUrl),
     ].join(""),
   };
 };
@@ -198,7 +201,7 @@ const buildUserEmail = (name: string | undefined, items: ReminderItem[]) => {
 const buildAdminEmail = (items: ReminderItem[]) => {
   const emailItems = groupReminderItems(items);
   const lines = emailItems.slice(0, MAX_EMAIL_ITEMS).map((item) => {
-    const customer = item.customerName ? `${item.customerName}: ` : "";
+    const customer = item.kind === "decoder" && item.customerName ? `${item.customerName}: ` : "";
     return `<li>${customer}${describeEmailItem(item)}</li>`;
   });
   const extraCount = Math.max(emailItems.length - MAX_EMAIL_ITEMS, 0);
@@ -209,12 +212,12 @@ const buildAdminEmail = (items: ReminderItem[]) => {
       "<p>The following decoder subscription(s) are within the reminder window or already overdue:</p>",
       `<ul>${lines.join("")}</ul>`,
       extraCount > 0 ? `<p>And ${extraCount} more subscription group(s).</p>` : "",
-      `<p>Open the admin dashboard: <a href="${env.clientUrl}/admin/subscriptions">${env.clientUrl}/admin/subscriptions</a></p>`,
+      ...buildReminderFooter(env.subscriptionReminderAdminDashboardUrl),
     ].join(""),
   };
 };
 
-const getReminderKey = (subscriptionId: unknown, reminderType: ReminderType, recipientKind: "user" | "admin", email: string) =>
+const getReminderKey = (subscriptionId: unknown, reminderType: ReminderType, recipientKind: ReminderRecipientKind, email: string) =>
   `${String(subscriptionId)}:${reminderType}:${recipientKind}:${normalizeEmail(email)}`;
 
 const getDueSubscriptions = async (now: Date): Promise<ReminderItem[]> => {
@@ -249,7 +252,7 @@ const getRecentReminderKeys = async (items: ReminderItem[], since: Date) => {
 
   return new Set(
     reminders.map((reminder) =>
-      getReminderKey(reminder.subscription, reminder.reminderType as ReminderType, reminder.recipientKind as "user" | "admin", reminder.recipientEmail),
+      getReminderKey(reminder.subscription, reminder.reminderType as ReminderType, reminder.recipientKind as ReminderRecipientKind, reminder.recipientEmail),
     ),
   );
 };
@@ -263,7 +266,7 @@ const userCanReceiveReminder = (user: ReminderUser | null | undefined) =>
       user.notificationPreferences?.billingAlerts !== false,
   );
 
-const recordSentReminders = async (items: ReminderItem[], recipientKind: "user" | "admin", recipientEmail: string, sentAt: Date, recipientUser?: unknown) => {
+const recordSentReminders = async (items: ReminderItem[], recipientKind: ReminderRecipientKind, recipientEmail: string, sentAt: Date, recipientUser?: unknown) => {
   if (items.length === 0) return;
 
   await SubscriptionReminder.insertMany(
@@ -282,20 +285,45 @@ const recordSentReminders = async (items: ReminderItem[], recipientKind: "user" 
 const getAdminReminderRecipients = async (): Promise<ReminderUser[]> => {
   const admins = await User.find({ role: "admin", status: "active" }).select("name email").lean<ReminderUser[]>();
   const recipientsByEmail = new Map<string, ReminderUser>();
+  const extraRecipientEmails = Array.from(new Set(env.subscriptionReminderRecipientEmails.map(normalizeEmail)));
+  const extraRecipientUsers = extraRecipientEmails.length > 0
+    ? await User.find({ email: { $in: extraRecipientEmails } }).select("name email role status").lean<ReminderUser[]>()
+    : [];
+  const extraUsersByEmail = new Map(
+    extraRecipientUsers
+      .filter((user) => user.email)
+      .map((user) => [normalizeEmail(user.email!), user]),
+  );
 
   for (const admin of admins) {
     if (!admin.email) continue;
     recipientsByEmail.set(normalizeEmail(admin.email), admin);
   }
 
-  for (const email of env.subscriptionReminderRecipientEmails) {
-    const normalizedEmail = normalizeEmail(email);
+  for (const normalizedEmail of extraRecipientEmails) {
+    const matchingUser = extraUsersByEmail.get(normalizedEmail);
+    if (matchingUser && (matchingUser.role !== "admin" || matchingUser.status !== "active")) continue;
+
     if (!recipientsByEmail.has(normalizedEmail)) {
-      recipientsByEmail.set(normalizedEmail, { email: normalizedEmail });
+      recipientsByEmail.set(normalizedEmail, matchingUser ?? { email: normalizedEmail });
     }
   }
 
   return Array.from(recipientsByEmail.values());
+};
+
+const getCategoryReminderRecipientEntries = () =>
+  Object.entries(env.subscriptionReminderCategoryRecipientEmails).map(([categoryName, emails]) => ({
+    categoryName,
+    normalizedCategoryName: normalizeCategoryName(categoryName),
+    emails: Array.from(new Set(emails.map(normalizeEmail))),
+  }));
+
+const addReminderItemOnce = (items: ReminderItem[], item: ReminderItem) => {
+  const alreadyAdded = items.some(
+    (existing) => String(existing.subscription._id) === String(item.subscription._id) && existing.reminderType === item.reminderType,
+  );
+  if (!alreadyAdded) items.push(item);
 };
 
 export const runSubscriptionReminderJob = async () => {
@@ -331,6 +359,34 @@ export const runSubscriptionReminderJob = async () => {
       const sent = await sendMail({ to: email, ...message });
       if (sent) {
         await recordSentReminders(payload.items, "user", email, now, payload.user._id);
+      }
+    }
+
+    const categoryItemsByEmail = new Map<string, ReminderItem[]>();
+    for (const entry of getCategoryReminderRecipientEntries()) {
+      const categoryItems = items.filter(
+        (item) => item.subscription.categoryName && normalizeCategoryName(item.subscription.categoryName) === entry.normalizedCategoryName,
+      );
+      if (categoryItems.length === 0) continue;
+
+      for (const email of entry.emails) {
+        const recipientItems = categoryItemsByEmail.get(email) ?? [];
+        for (const item of categoryItems) {
+          if (!recentKeys.has(getReminderKey(item.subscription._id, item.reminderType, "category", email))) {
+            addReminderItemOnce(recipientItems, item);
+          }
+        }
+        categoryItemsByEmail.set(email, recipientItems);
+      }
+    }
+
+    for (const [email, recipientItems] of categoryItemsByEmail) {
+      if (recipientItems.length === 0) continue;
+
+      const message = buildUserEmail(undefined, recipientItems);
+      const sent = await sendMail({ to: email, ...message });
+      if (sent) {
+        await recordSentReminders(recipientItems, "category", email, now);
       }
     }
 
